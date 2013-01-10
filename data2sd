@@ -1,0 +1,164 @@
+#!/system/bin/sh
+
+# 
+# Move app data between Internal Memory and SD Card according to Link2SD configuration.
+# 
+
+die() {
+  if [ "$1" == "" ]; then
+    echo "Error: Command not supported"
+  else
+    echo "Error: $1"
+  fi
+  exit 1
+}
+
+if [ $# -gt 0 ]; then
+  if [ "$1" == "-s" ]; then
+    echo "Simulator mode"
+  else
+    echo "Move app data between Internal Memory and SD Card according to Link2SD configuration."
+    echo "Use $0 -s for simulator mode."
+    exit 0
+  fi
+fi
+
+if [ "$(id | head -c 5)" != "uid=0" ]; then
+  die "Not superuser"
+fi
+
+test -d /data/data/    || die  "/data/data directory not found"
+test -d /data/app/     || die  "/data/app directory not found"
+test -d /data/sdext2/  || die  "2nd SD Card partition not found at /data/sdext2"
+test -d /mnt/sdcard/   || echo "SD Card not found at /mnt/sdcard. Skipping backup..."
+
+cd /data/data/
+
+echo "Scanning Internal Memory..."
+
+for dir in $(ls); do
+  # Scan for apps moved to SD Card
+  if [   -d ${dir} ] &&
+     [ ! -L ${dir} ] &&
+     [   -f /data/sdext2/${dir}-*.apk ] &&
+     [ ! -L /data/sdext2/${dir}-*.apk ]; then
+    echo -n "Moving to SD Card ${dir}... "
+
+    if [ "$1" != "-s" ]; then
+      if [ ! -d /data/sdext2/data2sd/ ]; then
+        mkdir        /data/sdext2/data2sd/        || die "mkdir"
+      fi
+      if [ -d /data/sdext2/data2sd/${dir}/ ]; then
+        rm -r        /data/sdext2/data2sd/${dir}/ || die "rm -r"
+      fi
+      cp -fpr ${dir} /data/sdext2/data2sd/        || die "cp -fpr"
+#     chmod 777 -R   /data/sdext2/data2sd/${dir}/ || die "chmod 777 -R"
+
+      if [ -d /mnt/sdcard/ ]; then
+        if [ ! -d /mnt/sdcard/backups/ ]; then
+          mkdir /mnt/sdcard/backups/              || die "mkdir"
+        fi
+        if [ ! -d /mnt/sdcard/backups/data/ ]; then
+          mkdir /mnt/sdcard/backups/data/         || die "mkdir"
+        fi
+        if [ -f /mnt/sdcard/backups/data/${dir}.tar ]; then
+          rm    /mnt/sdcard/backups/data/${dir}.tar          || die "rm"
+        fi
+        tar -cf /mnt/sdcard/backups/data/${dir}.tar ${dir}/* || die "tar -cf"
+#       cp -fr ${dir} /mnt/sdcard/backups/data/              || die "cp -fr"
+      fi
+
+      rm -r ${dir}                                  || die "rm -r"
+      ln -s /data/sdext2/data2sd/${dir} ${dir}      || die "ln -s"
+    fi
+
+    echo "done"
+  fi
+done
+
+echo "Scanning SD Card..."
+
+if [ -d /data/sdext2/data2sd/ ]; then
+
+cd /data/sdext2/data2sd/
+
+for dir in $(ls); do
+  # Scan for apps moved to internal memory
+  if [   -d ${dir} ] &&
+     [ ! -L ${dir} ] &&
+     ( ( [   -f /data/app/${dir}-*.apk ] &&
+         [ ! -L /data/app/${dir}-*.apk ] ) ||
+         [   -d /mnt/asec/${dir}-*     ] ) &&
+     [   -L /data/data/${dir} ]; then
+    echo -n "Moving to Internal Memory ${dir}... "
+
+    if [ "$1" != "-s" ]; then
+      rm             /data/data/${dir}  || die "rm"
+      cp -fpr ${dir} /data/data/        || die "cp -fpr"
+#     chmod 777 -R   /data/data/${dir}/ || die "chmod 777 -R"
+
+      if [ -d /mnt/sdcard/ ]; then
+        if [ ! -d /mnt/sdcard/backups/ ]; then
+          mkdir /mnt/sdcard/backups/             || die "mkdir"
+        fi
+        if [ ! -d /mnt/sdcard/backups/data/ ]; then
+          mkdir /mnt/sdcard/backups/data/        || die "mkdir"
+        fi
+        if [ -f /mnt/sdcard/backups/data/${dir}.tar ]; then
+          rm    /mnt/sdcard/backups/data/${dir}.tar          || die "rm -r"
+        fi
+        tar -cf /mnt/sdcard/backups/data/${dir}.tar ${dir}/* || die "tar -cf"
+#       cp -fr ${dir} /mnt/sdcard/backups/data/              || die "cp -fr"
+      fi
+
+      rm -r ${dir} || die "rm -r"
+    fi
+    
+    echo "done"
+  fi
+  
+  # Scan for uninstalled app's data folders
+  if [   -d ${dir} ] &&
+     [ ! -L ${dir} ] &&
+     [ ! "$(ls ${dir}/)" ] &&
+     [ ! -f /data/app/${dir}-*.apk ]; then
+    echo -n "Removing ${dir}... "
+    
+    if [ "$1" != "-s" ]; then
+      rm -r ${dir}                      || die "rm -r"
+      if [ -L /data/data/${dir} ]; then
+        rm /data/data/${dir}            || die "rm"
+      fi
+    fi
+    
+    echo "done"
+  fi
+done
+
+cd /data/sdext2/
+
+for file in $(ls *.apk); do
+  # Scan for uninstalled apps
+  if [   -f ${file} ] &&
+     [ ! -L ${file} ] &&
+     [ ! -f /data/app/${file} ] &&
+   [ ! -L /data/app/${file} ] &&
+     [ ! -f /data/app-private/${file} ] &&
+	 [ ! -L /data/app-private/${file} ]; then
+    echo -n "Removing ${file}... "
+    
+    if [ "$1" != "-s" ]; then
+      rm ${file}                        || die "rm"
+    fi
+    
+    echo "done"
+  fi
+done
+
+fi
+
+if [ "$1" == "-s" ]; then
+  echo "Simulator mode. No app moved."
+else
+  echo "Done"
+fi
